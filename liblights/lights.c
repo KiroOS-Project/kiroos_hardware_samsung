@@ -20,6 +20,7 @@
 /* #define LOG_NDEBUG 0 */
 
 #include <cutils/log.h>
+#include <cutils/properties.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -73,7 +74,8 @@ static int g_cur_led = -1;          // Presently showing LED of the above.
 
 void check_component_support()
 {
-    if (access(BUTTON_BRIGHTNESS_NODE, W_OK) == 0)
+    if (access(BUTTON_BRIGHTNESS_NODE, W_OK) == 0 ||
+        access("/sys/class/sec/sec_touchkey/brightness", W_OK) == 0)
         hw_components |= COMPONENT_BUTTON_LIGHT;
     if (access(LED_BLINK_NODE, W_OK) == 0)
         hw_components |= COMPONENT_LED;
@@ -150,6 +152,16 @@ static int set_light_buttons(struct light_device_t* dev __unused,
                              struct light_state_t const* state)
 {
     int err = 0;
+    char prop[PROPERTY_VALUE_MAX] = {0};
+    property_get("persist.sys.touchkey_led", prop, "1");
+    if (prop[0] == '0') {
+        pthread_mutex_lock(&g_lock);
+        err = set_cur_button_brightness(0);
+        write_str("/sys/class/sec/sec_touchkey/input/enabled", "0");
+        pthread_mutex_unlock(&g_lock);
+        return err;
+    }
+
     pthread_mutex_lock(&g_lock);
     int brightness = (state->color & COLOR_MASK) ? 1 : 0;
 

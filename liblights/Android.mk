@@ -34,7 +34,7 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := lights.c
 
-LOCAL_SHARED_LIBRARIES := liblog
+LOCAL_SHARED_LIBRARIES := liblog libcutils
 LOCAL_STATIC_LIBRARIES := liblights_helper
 
 LOCAL_MODULE := lights.$(TARGET_BOOTLOADER_BOARD_NAME)

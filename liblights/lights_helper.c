@@ -114,7 +114,11 @@ exit:
  */
 inline int set_cur_button_brightness(const int brightness)
 {
-    return write_int(BUTTON_BRIGHTNESS_NODE, brightness);
+    int ret = write_int(BUTTON_BRIGHTNESS_NODE, brightness);
+    if (ret != 0) {
+        ret = write_int("/sys/class/sec/sec_touchkey/brightness", brightness);
+    }
+    return ret;
 }
 
 /*
