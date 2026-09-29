@@ -22,9 +22,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <malloc.h>
+#include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <sys/types.h>
@@ -173,37 +176,78 @@ static void cpu_interactive_write(const char *param, char s[CLUSTER_COUNT][PARAM
     }
 }
 
-static void send_boost(int boost_fd, int32_t duration_us)
-{
-    int len;
+/*
+ * KiroOS: the interactive governor's sysfs nodes are removed and recreated whenever the
+ * governor of the LITTLE cluster is switched, and they are missing altogether if another
+ * governor was set when this HAL started. The fds opened at init then fail for good and the
+ * touch / launch boost was lost until the next reboot. Reopen them, at most every 5 s.
+ */
+#define BOOST_REOPEN_INTERVAL_NS 5000000000LL
 
-    if (boost_fd < 0) {
-        return;
+static int64_t now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int boost_node_write(int *fd, int64_t *last_open_ns, const char *node, const char *s)
+{
+    char path[PATH_MAX];
+
+    if (*fd >= 0 && write(*fd, s, strlen(s)) >= 0) {
+        return 0;
     }
 
-    len = write(boost_fd, "1", 1);
-    if (len < 0) {
-        ALOGE("Error writing to %s%s: %s", CPU_INTERACTIVE_PATHS[0], BOOST_PATH, strerror(errno));
+    if (now_ns() - *last_open_ns < BOOST_REOPEN_INTERVAL_NS) {
+        return -1;
+    }
+    *last_open_ns = now_ns();
+
+    if (*fd >= 0) {
+        close(*fd);
+    }
+    sprintf(path, "%s%s", CPU_INTERACTIVE_PATHS[0], node);
+    *fd = open(path, O_WRONLY);
+    if (*fd < 0) {
+        ALOGE("Error reopening %s: %s", path, strerror(errno));
+        return -1;
+    }
+    ALOGI("Reopened %s", path);
+
+    if (write(*fd, s, strlen(s)) < 0) {
+        ALOGE("Error writing to %s: %s", path, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+static void send_boost(struct samsung_power_module *samsung_pwr, int32_t duration_us)
+{
+    static int64_t last_open_ns;
+    int rc;
+
+    pthread_mutex_lock(&samsung_pwr->lock);
+    rc = boost_node_write(&samsung_pwr->boost_fd, &last_open_ns, BOOST_PATH, "1");
+    pthread_mutex_unlock(&samsung_pwr->lock);
+    if (rc < 0) {
         return;
     }
 
     usleep(duration_us);
-    len = write(boost_fd, "0", 1);
+
+    pthread_mutex_lock(&samsung_pwr->lock);
+    boost_node_write(&samsung_pwr->boost_fd, &last_open_ns, BOOST_PATH, "0");
+    pthread_mutex_unlock(&samsung_pwr->lock);
 }
 
-static void send_boostpulse(int boostpulse_fd)
+static void send_boostpulse(struct samsung_power_module *samsung_pwr)
 {
-    int len;
+    static int64_t last_open_ns;
 
-    if (boostpulse_fd < 0) {
-        return;
-    }
-
-    len = write(boostpulse_fd, "1", 1);
-    if (len < 0) {
-        ALOGE("Error writing to %s%s: %s", CPU_INTERACTIVE_PATHS[0], BOOSTPULSE_PATH,
-                strerror(errno));
-    }
+    pthread_mutex_lock(&samsung_pwr->lock);
+    boost_node_write(&samsung_pwr->boostpulse_fd, &last_open_ns, BOOSTPULSE_PATH, "1");
+    pthread_mutex_unlock(&samsung_pwr->lock);
 }
 
 /**********************************************************
@@ -491,7 +535,7 @@ static void samsung_power_hint(struct power_module *module,
             break;
         case POWER_HINT_INTERACTION:
             ALOGV("%s: POWER_HINT_INTERACTION", __func__);
-            send_boostpulse(samsung_pwr->boostpulse_fd);
+            send_boostpulse(samsung_pwr);
             break;
         case POWER_HINT_LOW_POWER:
             ALOGV("%s: POWER_HINT_LOW_POWER", __func__);
@@ -499,12 +543,12 @@ static void samsung_power_hint(struct power_module *module,
             break;
         case POWER_HINT_LAUNCH:
             ALOGV("%s: POWER_HINT_LAUNCH", __func__);
-            send_boostpulse(samsung_pwr->boostpulse_fd);
+            send_boostpulse(samsung_pwr);
             break;
         case POWER_HINT_CPU_BOOST:
             ALOGV("%s: POWER_HINT_CPU_BOOST", __func__);
             int32_t duration_us = *((int32_t *)data);
-            send_boost(samsung_pwr->boost_fd, duration_us);
+            send_boost(samsung_pwr, duration_us);
             break;
         case POWER_HINT_SET_PROFILE:
             ALOGV("%s: POWER_HINT_SET_PROFILE", __func__);
