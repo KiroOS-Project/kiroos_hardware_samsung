@@ -109,14 +109,20 @@ exit:
 /*
  * Set the current button brightness via sysfs.
  *
+ * KiroOS: on the Cypress touchkey of the Galaxy S6 family, BUTTON_BRIGHTNESS_NODE
+ * ("touchkey_brightness") sets the LED LDO voltage in mV. That LDO is fixed at 3.3 V, so a
+ * write fails inside the driver but still reports success, and the LED on/off command
+ * ("brightness", 0 or 1) was never sent: PowerManager's button light and its timeout never
+ * reached the LEDs. The on/off node goes first now.
+ *
  * @param brightness The brightness value.
  * @return 0 on success, errno on error.
  */
 inline int set_cur_button_brightness(const int brightness)
 {
-    int ret = write_int(BUTTON_BRIGHTNESS_NODE, brightness);
+    int ret = write_int(BUTTON_LED_NODE, brightness > 0 ? 1 : 0);
     if (ret != 0) {
-        ret = write_int("/sys/class/sec/sec_touchkey/brightness", brightness);
+        ret = write_int(BUTTON_BRIGHTNESS_NODE, brightness);
     }
     return ret;
 }
