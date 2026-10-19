@@ -2550,6 +2550,7 @@ static int do_out_standby_l(struct stream_out *out)
     out->standby = true;
     if (out->usecase != USECASE_AUDIO_PLAYBACK_OFFLOAD) {
         out_close_pcm_devices(out);
+        kiro_spk_reset(&out->spk);
 #ifdef PREPROCESSING_ENABLED
         /* stop writing to echo reference */
         if (out->echo_reference != NULL) {
@@ -2928,6 +2929,15 @@ false_alarm:
 
         if (out->muted)
             memset((void *)buffer, 0, bytes);
+        /* KiroOS: what goes to the loudspeaker passes the speaker protection (not in a call:
+         * the voice path has its own processing) */
+        const void *spk_buffer = buffer;
+        if (!out->muted && (out->devices & AUDIO_DEVICE_OUT_SPEAKER)
+                && out->config.format == PCM_FORMAT_S16_LE
+                && adev->mode != AUDIO_MODE_IN_CALL) {
+            spk_buffer = kiro_spk_process(&out->spk, buffer, bytes, out->config.channels,
+                    out->config.rate);
+        }
         list_for_each(node, &out->pcm_dev_list) {
             pcm_device = node_to_item(node, struct pcm_device, stream_list_node);
             if (pcm_device->pcm) {
@@ -2942,7 +2952,7 @@ false_alarm:
                  }
 #endif
                 ALOGVV("%s: writing buffer (%d bytes) to pcm device", __func__, bytes);
-                pcm_device->status = pcm_write(pcm_device->pcm, (void *)buffer, bytes);
+                pcm_device->status = pcm_write(pcm_device->pcm, (void *)spk_buffer, bytes);
                 if (pcm_device->status != 0)
                     ret = pcm_device->status;
             }
@@ -3802,6 +3812,7 @@ static void adev_close_output_stream(struct audio_hw_device *dev,
         if (out->compr_config.codec != NULL)
             free(out->compr_config.codec);
     }
+    kiro_spk_release(&out->spk);
     pthread_cond_destroy(&out->cond);
     pthread_mutex_destroy(&out->lock);
     free(stream);

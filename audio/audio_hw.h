@@ -29,6 +29,8 @@
 #include <audio_utils/resampler.h>
 #include <audio_route/audio_route.h>
 
+#include "kiro_spkprot.h"
+
 /* Retry for delay in FW loading*/
 #define RETRY_NUMBER 10
 #define RETRY_US 500000
@@ -291,6 +293,9 @@ struct stream_out {
     bool                         is_fastmixer_affinity_set;
 
     int64_t                      last_write_time_us;
+
+    /* KiroOS: speaker protection (kiro_spkprot.c) */
+    struct kiro_spk              spk;
 };
 
 struct stream_in {

@@ -24,6 +24,7 @@ LOCAL_SRC_FILES := \
 	audience.c \
 	audio_hw.c \
 	compress_offload.c \
+	kiro_spkprot.c \
 	ril_interface.c \
 	voice.c
 
