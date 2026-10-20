@@ -26,23 +26,66 @@ typedef struct {
     float b0, b1, b2, a1, a2;
 } kiro_bq_t;
 
-/* KiroOS speaker protection, one per output stream (see kiro_spkprot.c) */
+/* the Kiro Speaker Engine, one per output stream (see kiro_spkprot.c) */
 struct kiro_spk {
     unsigned int rate;
     int channels;
     int ready;
+    int64_t lastProps;
+
+    /* settings (properties, read again every second) */
+    int on;
     float xmax;             /* bass band level the speaker takes before it cracks */
     float limit;            /* peak ceiling */
+    float vbass;            /* virtual bass amount, 0..1.5 */
+    float shelfDb;          /* upper bass lift where the speaker still plays */
+    float loudDb;           /* loudness: makeup gain before the compressor */
+    float compThr;          /* the compressor's threshold (linear) */
+    int adapt;              /* follows the content and backs off on distortion */
+
+    /* filters */
     kiro_bq_t hp[2];        /* high pass: what the speaker cannot play */
     kiro_bq_t lp[2];        /* the bass band, where the cone runs out of travel */
+    kiro_bq_t shelf;        /* the upper bass lift */
+    kiro_bq_t vbIn[4];      /* the low notes the harmonics are made from (40..220 Hz, steep:
+                             * any voice left in it would mix with the bass in the harmonics) */
+    kiro_bq_t vbOut[4];     /* the harmonics kept: where the speaker plays them (180..800 Hz) */
+    kiro_bq_t mid[2];       /* the voice band, for the content analysis */
     float hpZ[2][2][2];     /* [stage][channel][state] */
     float lpZ[2][2][2];
+    float shelfZ[2][2];
+    float vbInZ[4][2];
+    float vbOutZ[4][2];
+    float midZ[2][2];
+
+    /* dynamics */
+    float vbEnv;            /* level of the low notes */
     float env;              /* level of the bass band */
     float bassGain;
+    float compEnv;
+    float compGain;
     float limGain;
-    float envAtk, envRel, bassAtk, bassRel, limAtk, limRel;
+    float holdTarget;       /* the lowest gain a peak still in the look-ahead needs */
+    int holdLeft;
+    /* the bass and loudness levels, held 25 ms so the gains do not follow single waves */
+    int holdFrames;
+    float bassHold, compHold;
+    int bassHoldLeft, compHoldLeft;
+    float envAtk, envRel, bassAtk, bassRel, limAtk, limRel, vbAtk, vbRel, compAtk, compRel;
     float delay[KIRO_SPK_LOOKAHEAD][2];
     int delayPos;
+
+    /* adaptation */
+    float speech;           /* 0 music .. 1 speech, slow */
+    float drive;            /* backoff on distortion, linear gain <= 1 */
+    float grAvg;            /* how hard the limiter works (dB, slow) */
+    float bassAvg;          /* how hard the excursion limiter works (gain, slow) */
+    float midBlock, allBlock;
+    int blockFrames;
+    float midHist[64];      /* voice band level per 31 ms block, the last 2 s */
+    int midPos;
+    unsigned clippedRecent;
+
     /* what it caught, for the log */
     float worstBass, worstPeak;
     unsigned clipped;
